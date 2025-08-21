@@ -1,18 +1,19 @@
 import type { SongInfo } from "@/@types";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
-import { Loader, Music, Play, PlayCircle, Search } from "lucide-react";
+import { Loader, Music, Play, PlayCircle, Search, Sparkles } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { useDebounce } from "../hooks/useDebounce";
+import { fetchRecsForUser } from "../redux/features/recommendationsSlice";
+import { useAppDispatch, useAppSelector } from "../redux/hooks";
 import { ControlPanel } from "./ControlPanel";
 import { QueryAnalysisPanel } from "./QueryAnalysisPanel";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Progress } from "./ui/progress";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { WaveformVisualizer } from "./WaveformVisualizer";
 
-// ... your interfaces stay the same ...
 interface MainContentProps {
   query: string;
   setQuery: (query: string) => void;
@@ -28,7 +29,6 @@ interface MainContentProps {
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-// const API_BASE_URL = "https://imd-be.onrender.com/api/v1";
 
 export function MainContent({
   query,
@@ -46,7 +46,10 @@ export function MainContent({
   const [progress, setProgress] = useState(0);
   const [parseStartTime, setParseStartTime] = useState<number | null>(null);
 
-  // Dynamic progress tracking
+  const dispatch = useAppDispatch();
+  const { token } = useAppSelector((state) => state.auth);
+  const { status } = useAppSelector((state) => state.recommendations);
+
   useEffect(() => {
     if (isParsingAudio) {
       const startTime = Date.now();
@@ -55,28 +58,22 @@ export function MainContent({
 
       const interval = setInterval(() => {
         const elapsed = Date.now() - startTime;
-
-        const estimatedTotalTime = 10000; // 10 seconds estimate
-
-        // Calculate progress with some smart scaling
+        const estimatedTotalTime = 10000;
         let newProgress;
+
         if (elapsed < estimatedTotalTime * 0.8) {
-          // First 80% of estimated time - linear progress
           newProgress = (elapsed / estimatedTotalTime) * 80;
         } else if (elapsed < estimatedTotalTime * 1.5) {
-          // Next phase - slower progress
           newProgress = 80 + ((elapsed - estimatedTotalTime * 0.8) / (estimatedTotalTime * 0.7)) * 15;
         } else {
-          // Final phase - very slow progress, max 95%
           newProgress = Math.min(95, 95 + ((elapsed - estimatedTotalTime * 1.5) / (estimatedTotalTime * 2)) * 5);
         }
 
-        setProgress(Math.min(95, newProgress)); // Cap at 95% until actually done
+        setProgress(Math.min(95, newProgress));
       }, 200);
 
       return () => clearInterval(interval);
     } else {
-      // When parsing is done, quickly complete the progress bar
       if (parseStartTime) {
         setProgress(100);
         const completeTimeout = setTimeout(() => {
@@ -90,20 +87,15 @@ export function MainContent({
 
   const { data: songList = [] } = useQuery({
     queryKey: ["songs"],
-    queryFn: async () => {
-      const response = await axios.get(`${API_BASE_URL}/songs`);
-      return response.data as SongInfo[];
-    },
+    queryFn: async () => (await axios.get(`${API_BASE_URL}/songs`)).data as SongInfo[],
     staleTime: 30 * 60 * 1000,
   });
 
-  // Debounced search suggestions
   const debouncedQuery = useDebounce(query, 200);
   const searchSuggestions = useMemo(() => {
     if (!debouncedQuery.trim() || debouncedQuery.length < 2) {
       return [];
     }
-
     const queryLower = debouncedQuery.toLowerCase();
     return songList
       .filter(
@@ -113,41 +105,68 @@ export function MainContent({
       .slice(0, 10);
   }, [songList, debouncedQuery]);
 
+  const handleForYouRecs = () => {
+    if (token) {
+      dispatch(fetchRecsForUser({}));
+    }
+  };
+
   return (
-    <div className="flex flex-col border-r border-gray-200 h-[100vh]">
+    <div className="flex flex-col border-r border-gray-200 h-screen">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 p-3 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <Search className="h-4 w-4 text-gray-500" />
-          <div className="relative flex-1">
+        <form onSubmit={onSearch} className="flex items-center gap-3">
+          <div className="relative flex-1 flex items-center">
+            <Search className="h-4 w-4 text-gray-500 absolute left-3 z-10" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               list="song-suggestions"
-              className="flex-1 h-8 bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-500 focus:bg-white focus:border-[#1db954] text-sm"
-              placeholder="Search songs, albums, artists"
+              className="flex-1 h-8 bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-500 focus:bg-white focus:border-[#1db954] text-sm pl-9"
+              placeholder="Search songs for content-based recommendations"
             />
             <datalist id="song-suggestions">
-              {searchSuggestions.map((song: SongInfo) => (
+              {searchSuggestions.map((song) => (
                 <option key={`${song.track_name}-${song.artist_name}`} value={song.track_name} />
               ))}
             </datalist>
           </div>
-          <form onSubmit={onSearch} className="">
-            <Button
-              type="submit"
-              disabled={!query.trim()}
-              className="w-full bg-[#1db954] hover:bg-[#1ed760] text-white font-semibold h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <PlayCircle className="h-3 w-3 mr-2" />
-              Get Recommendations
-            </Button>
-          </form>
-        </div>
+
+          <Button
+            type="submit"
+            disabled={!query.trim() || status === "loading"}
+            className="bg-[#1db954] hover:bg-[#1ed760] text-white font-semibold h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <PlayCircle className="h-3 w-3 mr-2" />
+            Get Recommendations
+          </Button>
+
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="inline-block">
+                  <Button
+                    type="button"
+                    onClick={handleForYouRecs}
+                    disabled={!token || status === "loading"}
+                    variant="outline"
+                    className="font-semibold h-8 text-sm border-purple-500 text-purple-600 hover:bg-purple-50 hover:text-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Sparkles className="h-3 w-3 mr-2" />
+                    For You
+                  </Button>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{token ? "Get personalized recs based on your likes" : "Log in to get 'For You' recommendations"}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </form>
       </header>
 
       {/* Content Area */}
-      <main className="flex-1 overflow-y-autoy bg-white flex flex-col justify-between ">
+      <main className="flex-1 overflow-y-auto bg-white flex flex-col justify-between">
         <div className="w-full">
           <div className="p-4 space-y-4">
             {/* Discovery Section */}
@@ -204,30 +223,32 @@ export function MainContent({
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="sm"
-                      onClick={() =>
-                        onYouTubeSearch(
-                          currentPlayingSong?.artist_name?.trim()?.toLowerCase() === "uploaded audio"
-                            ? {
-                                track_name: currentPlayingSong?.track_name?.split(".")?.[0],
-                                artist_name: "",
-                              }
-                            : currentPlayingSong
-                        )
-                      }
-                      className="bg-red-600 hover:bg-red-700 text-white h-8 text-sm cursor-pointer"
-                    >
-                      <Play className="h-3 w-3 mr-2" />
-                      YouTube
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Search on YouTube</p>
-                  </TooltipContent>
-                </Tooltip>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          onYouTubeSearch(
+                            currentPlayingSong.artist_name?.trim().toLowerCase() === "uploaded audio"
+                              ? {
+                                  track_name: currentPlayingSong.track_name?.split(".")?.[0],
+                                  artist_name: "",
+                                }
+                              : currentPlayingSong
+                          )
+                        }
+                        className="bg-red-600 hover:bg-red-700 text-white h-8 text-sm cursor-pointer"
+                      >
+                        <Play className="h-3 w-3 mr-2" />
+                        YouTube
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Search on YouTube</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
             </div>
           </div>

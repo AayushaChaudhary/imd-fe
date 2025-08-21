@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "./components/Layout";
+import { Toaster } from "sonner";
 
 // Create a query client
 const queryClient = new QueryClient({
@@ -11,11 +12,14 @@ const queryClient = new QueryClient({
   },
 });
 
-// App component wrapped with QueryClientProvider
 function AppWrapper() {
   return (
+    // <QueryClientProvider client={queryClient}>
+    //   <Layout />
+    // </QueryClientProvider>
     <QueryClientProvider client={queryClient}>
       <Layout />
+      <Toaster richColors position="top-right" />
     </QueryClientProvider>
   );
 }

@@ -1,6 +1,7 @@
 import type { SongInfo } from "@/@types";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { clearRecommendations, fetchRecsByAudio, fetchRecsBySongName } from "../redux/features/recommendationsSlice";
+import { fetchMe, fetchMyLikes } from "../redux/features/authSlice";
 import { useAppDispatch, useAppSelector } from "../redux/hooks";
 import { RecommendationsSidebar } from "./RecommendationsSidebar";
 import { LibrarySidebar } from "./LibrarySidebar";
@@ -16,6 +17,14 @@ export function Layout() {
 
   const dispatch = useAppDispatch();
   const { songs, status, error, queryFileName, queryAudioFeatures } = useAppSelector((state) => state.recommendations);
+  const { token } = useAppSelector((state) => state.auth);
+
+  useEffect(() => {
+    if (token) {
+      dispatch(fetchMe());
+      dispatch(fetchMyLikes());
+    }
+  }, [token, dispatch]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,14 +32,12 @@ export function Layout() {
       setUploadedFile(null);
       const result = await dispatch(fetchRecsBySongName(query));
 
-      // Check if the request was successful and has recommendations
       if (result.meta.requestStatus === "fulfilled" && result.payload.recommendations?.length > 0) {
         setCurrentPlayingSong({
           track_name: result.payload.recommendations[0].track_name,
           artist_name: result.payload.recommendations[0].artist_name,
         });
       } else {
-        // Fallback if no recommendations found
         setCurrentPlayingSong({
           track_name: query,
           artist_name: "Unknown Artist",
